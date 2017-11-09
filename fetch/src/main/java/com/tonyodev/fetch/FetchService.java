@@ -128,7 +128,9 @@ public final class FetchService implements FetchConst {
             extras = new Bundle();
         }
 
-        FetchService.getInstance(context).runAction(extras);
+        synchronized (FetchService.class) {
+            FetchService.getInstance(context).runAction(extras);
+        }
     }
 
     public static void processPendingRequests(@NonNull Context context) {
@@ -139,7 +141,10 @@ public final class FetchService implements FetchConst {
 
         final Bundle bundle = new Bundle();
         bundle.putInt(FetchService.ACTION_TYPE, FetchService.ACTION_PROCESS_PENDING);
-        FetchService.getInstance(context).runAction(bundle);
+
+        synchronized (FetchService.class) {
+            FetchService.getInstance(context).runAction(bundle);
+        }
     }
 
     public static FetchService getInstance(@NonNull Context context) {
@@ -204,9 +209,15 @@ public final class FetchService implements FetchConst {
         processAction(bundle);
     }
 
+    public void tryShutdown() {
+        //synchronize check for pending requests and setting of shuttingDown flag with queueing of requests
+        synchronized (FetchService.class) {
+            //don't shutdown if request is still pending
+            if (runningTask || activeDownloads.size() > 0 || databaseHelper.hasPendingRequests())
+                return;
 
-    public void shutdown() {
-        shuttingDown = true;
+            shuttingDown = true;
+        }
 
         if (!executor.isShutdown()) {
             executor.shutdown();
@@ -222,7 +233,7 @@ public final class FetchService implements FetchConst {
     }
 
     private void processAction(final Bundle bundle) {
-        if (!executor.isShutdown()) {
+        if (!shuttingDown && !executor.isShutdown()) {
 
             executor.execute(new Runnable() {
                 @Override
@@ -372,9 +383,8 @@ public final class FetchService implements FetchConst {
             if (activeDownloads.size() < downloadsLimit && databaseHelper.hasPendingRequests()) {
                 startDownload();
             }
-        } else if (!runningTask && activeDownloads.size() == 0 && !databaseHelper.hasPendingRequests()) {
-            shuttingDown = true;
-            shutdown();
+        } else {
+            tryShutdown();
         }
     }
 
